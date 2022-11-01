@@ -2,15 +2,9 @@
 
 declare(strict_types=1);
 /**
- * 可用版RSA加密
+ * 第二版实现，使用二进制字符串直接转数字的方式
  */
-const OFFSET = 10;
 
-// base64码值与字符的对应关系
-const BASE64_CODE_VALUE = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/'];
-
-// base64码值与字符的对应关系(flip)
-const BASE64_VALUE_CODE = ['A' => 0, 'Q' => 16, 'g' => 32, 'w' => 48, 'B' => 1, 'R' => 17, 'h' => 33, 'x' => 49, 'C' => 2, 'S' => 18, 'i' => 34, 'y' => 50, 'D' => 3, 'T' => 19, 'j' => 35, 'z' => 51, 'E' => 4, 'U' => 20, 'k' => 36, '0' => 52, 'F' => 5, 'V' => 21, 'l' => 37, '1' => 53, 'G' => 6, 'W' => 22, 'm' => 38, '2' => 54, 'H' => 7, 'X' => 23, 'n' => 39, '3' => 55, 'I' => 8, 'Y' => 24, 'o' => 40, '4' => 56, 'J' => 9, 'Z' => 25, 'p' => 41, '5' => 57, 'K' => 10, 'a' => 26, 'q' => 42, '6' => 58, 'L' => 11, 'b' => 27, 'r' => 43, '7' => 59, 'M' => 12, 'c' => 28, 's' => 44, '8' => 60, 'N' => 13, 'd' => 29, 't' => 45, '9' => 61, 'O' => 14, 'e' => 30, 'u' => 46, '+' => 62, 'P' => 15, 'f' => 31, 'v' => 47, '/' => 63];
 
 /**
  * 扩展欧几里得算法，用来求模的逆元
@@ -30,8 +24,6 @@ function extGcd(string $a, string $b): array
 
 /**
  * 获取秘钥对，（n, e, d).
- * 求私钥D，满足两个条件：1 < D < Z， (E * D) mod Z = 1
- * 简单实现可以用遍历来求，实际使用扩展欧几里得算法求
  */
 function getKey(string $p, string $q): array
 {
@@ -48,7 +40,7 @@ function getKey(string $p, string $q): array
 
 /**
  * RSA加密解密；当指数为公钥时定义为加密，私钥时定义为解密
- * 可以采用快速求幂算法，bcMath中已经实现有相关的函数.
+ * 因此可以采用快速求幂算法，bcmath中已经实现有相关的函数.
  */
 function RSA(string $m, string $n, string $exponent): string
 {
@@ -56,43 +48,62 @@ function RSA(string $m, string $n, string $exponent): string
 }
 
 /**
- * 中文——》base64编码——》字母转数字（+10）——》加密
+ * 字符串的二进制转数值
+ */
+function stringToBinitNumber(string $str): string
+{
+    $binStr = '';
+    $num = '';
+    // 获取二进制字符串
+    foreach (str_split($str) as $char) {
+        $bin = decbin(ord($char));
+        // 小于128时，需补全8bit，左填0
+        if (strlen($bin) < 8) {
+            $bin = str_repeat('0', 8 - strlen($bin)) . $bin;
+        }
+        $binStr .= $bin;
+    }
+
+    // 理论上需要反转字符串才能够得到实际对应的十进制值，但我在解密时用除2取余法从十进制转二进制，得到的是逆序的二进制字符串，刚好抵消
+    foreach (str_split($binStr) as $index => $binChar) {
+        $num = bcadd($num, bcmul($binChar, bcpow('2', (string) $index)));
+    }
+    return $num;
+}
+
+/**
+ * 将长数字字符串转为原始数据.
+ */
+function numberToBinitString(string $num): string
+{
+    $binStr = '';
+    $hexStr = '';
+    // 除2取余法转十进制
+    while (bccomp($num, '0') > 0) {
+        $binStr .= bcmod($num, '2');
+        $num = bcdiv($num, '2');
+    }
+    // 解密时，需要从二进制字符串得到16进制的字符串（防止int型溢出正数范围，以16bit分割）
+    foreach (str_split($binStr, 16) as $bin4Char) {
+        $hexStr .= dechex(bindec($bin4Char));
+    }
+    return hex2bin($hexStr);
+}
+
+/**
  * 对字符串进行RSA加密运算，获取密文.
  */
 function getEncryptedString(string $message, string $n, string $exponent): string
 {
-    // 1、原文转base64
-    $base64String = base64_encode($message);
-
-    // 2、base64转数字(逐字母)
-    $base64Letters = str_split($base64String);
-    $integerString = '';
-    foreach ($base64Letters as $base64Letter) {
-        $integerString .= BASE64_VALUE_CODE[$base64Letter] + OFFSET;
-    }
-
-    // 3、加密
-    return RSA($integerString, $n, $exponent);
+    return RSA(stringToBinitNumber($message), $n, $exponent);
 }
 
 /**
- * 解密——》十进制（2位切割）——》数字转base64字母（-10）——》base64解密
  * 对字符串进行RSA解密运算，获取明文.
  */
 function getDecryptedString(string $encryptedString, string $n, string $exponent): string
 {
-    // 1、解密（得到数字）
-    $decryptedString = RSA($encryptedString, $n, $exponent);
-
-    // 2、切割转Base64字符串
-    $base64Integers = str_split($decryptedString, 2);
-    $base64String = '';
-    foreach ($base64Integers as $integer) {
-        $base64String .= BASE64_CODE_VALUE[$integer - OFFSET];
-    }
-
-    // 3、base64解码
-    return base64_decode($base64String);
+    return numberToBinitString(RSA($encryptedString, $n, $exponent));
 }
 
 // RSA算法的参数，两个大质数p和q
@@ -103,11 +114,10 @@ $q = '14481942446584230780635367254734412529071675353523965841788382894123250962
 $message = 'Hello World!';
 $Chinese = '你好，世界！';
 
-// 密钥参数
 [$n, $e, $d] = getKey($p, $q);
 print_r([$n, $e, $d]);
 
-// 使用公钥加密
-$encryptedString = getEncryptedString("{$Chinese} {$message}", $n, $e);
+// 使用私钥钥加密
+$encryptedString = getEncryptedString("{$Chinese} {$message}", $n, $d);
 
-print_r([$encryptedString, getDecryptedString($encryptedString, $n, $d)]);
+print_r([$encryptedString, getDecryptedString($encryptedString, $n, $e)]);
