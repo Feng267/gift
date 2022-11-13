@@ -83,6 +83,10 @@ function numberToBinitString(string $num): string
         $binStr .= bcmod($num, '2');
         $num = bcdiv($num, '2');
     }
+    // 非8的整数，则在后面补0
+    if (strlen($binStr) % 8) {
+        $binStr .= str_repeat('0', 8 - (strlen($binStr) % 8));
+    }
     // 解密时，需要从二进制字符串得到16进制的字符串（防止int型溢出正数范围，以16bit分割）
     foreach (str_split($binStr, 16) as $bin4Char) {
         $hexStr .= dechex(bindec($bin4Char));
